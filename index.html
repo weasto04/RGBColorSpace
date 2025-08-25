@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>RGB Color Space Scatter</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <main>
+    <h1>RGB Color Space — 3D Scatter (no frameworks)</h1>
+
+    <section class="controls">
+      <label for="preset">1) Choose an example image:</label>
+      <select id="preset"></select>
+
+      <label for="upload" class="upload-label">or 2) Upload your own image:</label>
+      <input type="file" id="upload" accept="image/*">
+
+      <div class="sampling">
+        <label>Sampling:</label>
+        <div class="sampling-buttons">
+          <button class="sample-btn" data-step="8">Low (fast)</button>
+          <button class="sample-btn active" data-step="4">Medium (default)</button>
+          <button class="sample-btn" data-step="1">High (detailed)</button>
+        </div>
+      </div>
+
+      <button id="resetView">Reset view</button>
+      <div class="info">Sampled points: <strong id="pointCount">0</strong></div>
+    </section>
+
+    <section class="canvas-wrap">
+      <canvas id="plot" width="800" height="600"></canvas>
+    </section>
+
+    <p class="hint">How it works: each pixel's (R,G,B) channels become a 3D point where R→x, G→y, B→z (range 0..1). Drag to rotate, scroll to zoom. The view updates automatically when you pick or upload an image. Choose a sampling preset to control speed vs detail.</p>
+
+    <div class="preview">
+      <strong>Selected image preview</strong>
+      <img id="thumb" alt="preview" />
+    </div>
+
+    <!-- Hidden image & offscreen canvas used to read pixels -->
+    <img id="sourceImage" style="display:none" crossorigin="anonymous">
+    <canvas id="readCanvas" style="display:none"></canvas>
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>
