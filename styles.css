@@ -17,6 +17,7 @@ button{cursor:pointer}
 .sampling-buttons {display:flex;gap:6px}
 .sample-btn{background:#07202a;border:1px solid rgba(255,255,255,0.04);padding:6px 8px;border-radius:6px;color:var(--text)}
 .sample-btn.active{background:#0ea5a4}
+.info button, button#fitView{margin-left:6px}
 .canvas-wrap{background:#07101a;padding:8px;border-radius:8px}
 canvas{display:block;max-width:100%;height:auto;background:black;border-radius:4px}
 .hint{color:var(--muted);font-size:13px;margin-top:8px}

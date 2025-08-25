@@ -17,6 +17,7 @@
   const canvas = document.getElementById('plot');
   const ctx = canvas.getContext('2d');
   const resetBtn = document.getElementById('resetView');
+  const fitBtn = document.getElementById('fitView');
 
   // Preload presets by fetching a directory listing (we'll try to fetch known files)
   const presetPath = 'rgb_images/rgb_images/';
@@ -37,7 +38,7 @@
 
   // Keep app state
   let points = []; // [{x,y,z,color}]
-  let view = {rx: -0.9, ry: 0.6, zoom: 1.6};
+  let view = {rx: -0.9, ry: 0.6, zoom: 1.6, panX: 0, panY: 0};
 
   // autoRender helper (called when image or sampling changes)
   function autoRender(){
@@ -77,7 +78,7 @@
   sourceImage.src = presetSelect.value;
   thumb.src = sourceImage.src;
 
-  resetBtn.addEventListener('click', ()=>{ view = {rx:-0.9, ry:0.6, zoom:1.6}; draw(); });
+  resetBtn.addEventListener('click', ()=>{ view = {rx:-0.9, ry:0.6, zoom:1.6, panX:0, panY:0}; draw(); });
 
   function samplePixelsAndBuildPoints(img, step){
     const w = img.naturalWidth; const h = img.naturalHeight;
@@ -96,37 +97,87 @@
       }
     }
     pointCountEl.textContent = points.length;
-    // automatically adjust zoom to fit the sampled points
-    autoZoom();
+  // automatically adjust zoom and pan to fit the sampled points
+  autoZoom();
     draw();
   }
 
   // Adjust view.zoom so the current points fit comfortably in the canvas
   function autoZoom(){
-    if(!points || points.length === 0) { view.zoom = 1; return; }
+    if(!points || points.length === 0) { view.zoom = 1; view.panX = 0; view.panY = 0; return; }
     const w = canvas.width, h = canvas.height;
-    // measure projected extents at zoom = 1
-    const oldZoom = view.zoom;
-    view.zoom = 1;
-    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    // use rotation-only transformed coords (no scaling) to compute extents that match the current view rotation
+    const sinX = Math.sin(view.rx), cosX = Math.cos(view.rx);
+    const sinY = Math.sin(view.ry), cosY = Math.cos(view.ry);
+    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+    let cx = 0, cy = 0, cz = 0;
     for(let i=0;i<points.length;i++){
-      const pr = project(points[i], w, h);
-      if(pr.sx < minX) minX = pr.sx;
-      if(pr.sy < minY) minY = pr.sy;
-      if(pr.sx > maxX) maxX = pr.sx;
-      if(pr.sy > maxY) maxY = pr.sy;
+      const p = points[i];
+      cx += p.x; cy += p.y; cz += p.z;
+      let x = p.x - 0.5, y = p.y - 0.5, z = p.z - 0.5;
+      // rotate Y
+      const x1 = cosY * x + sinY * z;
+      const z1 = -sinY * x + cosY * z;
+      // rotate X
+      const y1 = cosX * y - sinX * z1;
+      // track extents in rotated X/Y units
+      if(x1 < minX) minX = x1; if(x1 > maxX) maxX = x1;
+      if(y1 < minY) minY = y1; if(y1 > maxY) maxY = y1;
     }
-    // restore zoom only for calculation -> we'll set new zoom below
-    const spanX = Math.max(1, maxX - minX);
-    const spanY = Math.max(1, maxY - minY);
-    const span = Math.max(spanX, spanY);
-    // target is to occupy about 70% of the smaller canvas dimension
+    cx /= points.length; cy /= points.length; cz /= points.length;
+    const spanX = Math.max(1e-6, maxX - minX);
+    const spanY = Math.max(1e-6, maxY - minY);
+    const spanUnits = Math.max(spanX, spanY);
+    // target pixels to occupy about 70% of smaller canvas dim
     const target = Math.min(w, h) * 0.70;
-    let newZoom = span > 0 ? (target / span) : oldZoom;
-    // clamp to reasonable range
-    newZoom = Math.max(0.2, Math.min(6, newZoom));
+    // base (pixels per unit) desired
+    const desiredBase = target / spanUnits;
+    const baseFactor = Math.min(w, h) * 0.9; // matches project() base multiplier
+    let newZoom = desiredBase / baseFactor;
+    newZoom = Math.max(0.15, Math.min(8, newZoom));
     view.zoom = newZoom;
+    // compute centroid position in rotated coords, then to screen using base
+    let cxr = cx - 0.5, cyr = cy - 0.5, czr = cz - 0.5;
+    const cx1 = cosY * cxr + sinY * czr;
+    const cz1 = -sinY * cxr + cosY * czr;
+    const cy1 = cosX * cyr - sinX * cz1;
+    const base = Math.min(w, h) * 0.9 * view.zoom;
+    const sx = cx1 * base + w/2;
+    const sy = -cy1 * base + h/2;
+    view.panX = (w/2) - sx;
+    view.panY = (h/2) - sy;
   }
+
+  // animate view to current fit (used by Fit button)
+  function animateTo(target, duration=400){
+    const start = {rx:view.rx, ry:view.ry, zoom:view.zoom, panX:view.panX, panY:view.panY};
+    const t0 = performance.now();
+    function step(now){
+      const p = Math.min(1, (now - t0)/duration);
+      const ease = 0.5 - 0.5*Math.cos(Math.PI*p); // smooth ease-in-out
+      view.rx = start.rx + (target.rx - start.rx)*ease;
+      view.ry = start.ry + (target.ry - start.ry)*ease;
+      view.zoom = start.zoom + (target.zoom - start.zoom)*ease;
+      view.panX = start.panX + (target.panX - start.panX)*ease;
+      view.panY = start.panY + (target.panY - start.panY)*ease;
+      draw();
+      if(p < 1) requestAnimationFrame(step);
+    }
+    requestAnimationFrame(step);
+  }
+
+  fitBtn.addEventListener('click', ()=>{
+    // compute target via autoZoom but don't apply directly; instead animate to it
+    const backup = {rx:view.rx, ry:view.ry, zoom:view.zoom, panX:view.panX, panY:view.panY};
+    // temporarily compute fit values
+    const oldZoom = view.zoom;
+    const oldPanX = view.panX; const oldPanY = view.panY;
+    autoZoom();
+    const target = {rx:view.rx, ry:view.ry, zoom:view.zoom, panX:view.panX, panY:view.panY};
+    // restore then animate
+    view.zoom = oldZoom; view.panX = oldPanX; view.panY = oldPanY;
+    animateTo(target, 500);
+  });
 
   // Basic 3D projection + orbit controls
   function project(p, w, h){
@@ -143,8 +194,8 @@
     let z2 = sinX * y + cosX * z1;
     // orthographic scale (independent of z) so navigation feels stable
     const base = Math.min(w, h) * 0.9 * view.zoom;
-    const sx = x1 * base + w / 2;
-    const sy = -y1 * base + h / 2; // invert y for screen coordinates
+  const sx = x1 * base + w / 2 + (view.panX || 0);
+  const sy = -y1 * base + h / 2 + (view.panY || 0); // invert y for screen coordinates
     const depth = z2; // keep depth for simple painter's ordering
     return {sx, sy, depth, base};
   }
@@ -174,6 +225,17 @@
   ctx.fillText('R (1,0,0)', rCorner.sx + 8, rCorner.sy + 4);
   ctx.fillText('G (0,1,0)', gCorner.sx + 8, gCorner.sy + 4);
   ctx.fillText('B (0,0,1)', bCorner.sx + 8, bCorner.sy + 4);
+
+    // draw lightly the bounding box and centroid to indicate where the data is
+    if(points && points.length){
+      // compute projected bounding box
+      let minX=Infinity,minY=Infinity,maxX=-Infinity,maxY=-Infinity,cx=0,cy=0,cz=0;
+      for(let i=0;i<points.length;i++){ const pr = project(points[i],w,h); if(pr.sx<minX)minX=pr.sx; if(pr.sy<minY)minY=pr.sy; if(pr.sx>maxX)maxX=pr.sx; if(pr.sy>maxY)maxY=pr.sy; cx+=points[i].x; cy+=points[i].y; cz+=points[i].z; }
+      cx/=points.length; cy/=points.length; cz/=points.length;
+      ctx.strokeStyle = 'rgba(200,200,255,0.08)'; ctx.lineWidth = 1; ctx.strokeRect(minX,minY,maxX-minX,maxY-minY);
+      const cent = project({x:cx,y:cy,z:cz}, w, h);
+      ctx.fillStyle = 'rgba(255,255,255,0.9)'; ctx.beginPath(); ctx.arc(cent.sx, cent.sy, 3,0,Math.PI*2); ctx.fill();
+    }
 
     // draw points sorted by depth (simple painter's algorithm)
     const sorted = points.map(p=>({p,pr:project(p,w,h)})).sort((a,b)=>a.pr.depth - b.pr.depth);
